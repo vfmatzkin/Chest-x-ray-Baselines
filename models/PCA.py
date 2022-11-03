@@ -55,8 +55,11 @@ class DecoderPCA(nn.Module):
         super(DecoderPCA, self).__init__()
         
         device = config['device']
-        
-        if config['Lungs']:
+
+        if config['Heads']:
+            self.matrix = np.load('models/heads_pca_components.npy')
+            self.mean = np.load('models/heads_pca_mean.npy')
+        elif config['Lungs']:
             self.matrix = np.load('models/lungs_pca_components.npy')
             self.mean = np.load('models/lungs_pca_mean.npy')
         else:
