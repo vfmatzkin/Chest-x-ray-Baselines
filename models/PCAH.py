@@ -3,6 +3,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class residualBlock3D(nn.Module):
@@ -48,7 +49,7 @@ class residualBlock3D(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, latents=64, h=224, w=224, slices=20):
+    def __init__(self, latents=32, h=256, w=256, slices=128):
         super(Encoder, self).__init__()
 
         self.residual1 = residualBlock3D(in_channels=1, out_channels=8)
@@ -59,23 +60,22 @@ class Encoder(nn.Module):
         self.residual6 = residualBlock3D(in_channels=128, out_channels=128)
 
         # Input shape is slices x h x w
-        self.maxpool = nn.MaxPool3d((1, 2, 2), stride=(1, 2, 2))
-        self.maxpool_2 = nn.MaxPool3d((2, 2, 2), stride=(2, 2, 2))
+        self.maxpool = nn.MaxPool3d((2, 2, 2), stride=(2, 2, 2))
 
         h2 = h // 32
         w2 = w // 32
-        s2 = slices // 2
+        s2 = slices // 32
 
         self.mu = nn.Linear(128 * h2 * w2 * s2, latents)
-        self.sigma = nn.Linear(128 * h2 * w2 * s2, latents)
 
     def forward(self, x):
+        x = F.interpolate(x, size=(128, 256, 256))
         x = self.residual1(x)
         x = self.maxpool(x)
         x = self.residual2(x)
         x = self.maxpool(x)
         l3 = self.residual3(x)
-        x = self.maxpool_2(l3)
+        x = self.maxpool(l3)
         l4 = self.residual4(x)
         x = self.maxpool(l4)
         l5 = self.residual5(x)
@@ -85,9 +85,8 @@ class Encoder(nn.Module):
         x = x.view(l6.size(0), -1)
 
         mu = self.mu(x)
-        sigma = self.sigma(x)
 
-        return mu, sigma
+        return mu
 
 
 class DecoderPCA(nn.Module):
@@ -119,13 +118,12 @@ class PCAH_Net(nn.Module):
     def __init__(self, config):
         super(PCAH_Net, self).__init__()
 
-        hw = config['inputsize'] // 32
         self.z = config['latents']
 
-        self.encoder = Encoder(latents=self.z, hw=hw)
+        self.encoder = Encoder(32)
         self.decoder = DecoderPCA(config)
 
     def forward(self, x):
-        x = self.encoder(x)
+        x = self.encoder(x)  # returns mu
         x = self.decoder(x)
         return x

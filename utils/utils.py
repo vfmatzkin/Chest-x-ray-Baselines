@@ -194,18 +194,20 @@ def genMatrixesLungsHeart():
     return A, AD, D, U
 
 
-def CrossVal(all_files, iFold, k = 5):
-    #Performs 5-Fold-CrossValidation
-    
-    total = len(all_files)
-    val = int(total/k)
-    
-    indices = list(range(total))
-    
-    train_indices = indices[0:(iFold-1)*val] + indices[iFold*val:]
-    val_indices = indices[(iFold-1)*val:iFold*val]
+def CrossVal(all_files, iFold, k = 5, p = 0.783):
+    if k>1:
+        total = len(all_files)
+        val = int(total/k)
 
-    train_paths = [all_files[i] for i in train_indices]
-    val_paths = [all_files[i] for i in val_indices]
-    
+        indices = list(range(total))
+
+        train_indices = indices[0:(iFold-1)*val] + indices[iFold*val:]
+        val_indices = indices[(iFold-1)*val:iFold*val]
+
+        train_paths = [all_files[i] for i in train_indices]
+        val_paths = [all_files[i] for i in val_indices]
+    else:
+        train_paths = all_files[:int(p*len(all_files))]
+        val_paths = all_files[int(p*len(all_files)):]
+
     return train_paths, val_paths
