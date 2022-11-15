@@ -21,11 +21,11 @@ from src.utils.utils import genMatrixesLungs, \
 from src.utils.datasetHeads import SkullRandomHole
 
 
-def trainer(train_dataset, val_dataset, model, config):
-    torch.manual_seed(420)
+def trainer(train_dataset, val_dataset, model, config, seed=420):
+    torch.manual_seed(seed)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(device)
+    print(f"running in {device}")
 
     model = model.to(device)
 

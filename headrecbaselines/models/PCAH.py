@@ -103,7 +103,7 @@ class DecoderPCA(nn.Module):
         device = config['device']
 
         if config['Heads']:
-            self.matrix = np.load('models/heads_pca_components.npy')
+            self.matrix = np.load('trained/heads_pca_components.npy')
             self.mean = np.load('models/heads_pca_mean.npy')
         elif config['Lungs']:
             self.matrix = np.load('models/lungs_pca_components.npy')
