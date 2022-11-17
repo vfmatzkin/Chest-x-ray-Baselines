@@ -6,29 +6,18 @@ import vedo
 from ctunet.pytorch.transforms import random_blank_patch
 from torch.utils.data import Dataset
 
-
-def check_files_exist(files, exception=True):
-    if type(files) is not list:
-        files = [files]
-    for f in files:
-        if not os.path.exists(f):
-            if exception:
-                raise FileNotFoundError(f)
-            else:
-                print(f"File {f} not found.")
-                return False
-    return True
+from .utils import check_files_exist
 
 
 class MeshHeadsDataset(Dataset):
     # self, images, img_path, label_path, transform=None, heart = False
     def __init__(self, images, img_path, label_path=None, transform=None,
-                 heart=False):
+                 test=False):
         self.images = images
         self.img_path = img_path
         self.label_path = label_path if label_path else img_path
-        self.heart = heart
         self.transform = transform
+        self.test = test
 
     def __len__(self):
         return len(self.images)
@@ -44,7 +33,7 @@ class MeshHeadsDataset(Dataset):
                              '_decimated_1perc_dfm.vtk')
         )
 
-        check_files_exist([img_path, lmk_pth], exception=False)
+        check_files_exist([img_path, lmk_pth], False, not self.test)
         
         image = torch.tensor(
             sitk.GetArrayFromImage(sitk.ReadImage(img_path)),

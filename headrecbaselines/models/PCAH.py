@@ -3,18 +3,12 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as f
 
 
-class residualBlock3D(nn.Module):
+class ResidualBlock3D(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
-        """
-        Args:
-          in_channels (int):  Number of input channels.
-          out_channels (int): Number of output channels.
-          stride (int):       Controls the stride.
-        """
-        super(residualBlock3D, self).__init__()
+        super(ResidualBlock3D, self).__init__()
 
         self.skip = nn.Sequential()
 
@@ -43,7 +37,7 @@ class residualBlock3D(nn.Module):
             identity = self.skip(x)
 
         out += identity
-        out = F.relu(out)
+        out = f.relu(out)
 
         return out
 
@@ -58,12 +52,12 @@ class Encoder(nn.Module):
         self.z = config['latents']
         self.slices = config['slices']
 
-        self.residual1 = residualBlock3D(in_channels=1, out_channels=8)
-        self.residual2 = residualBlock3D(in_channels=8, out_channels=16)
-        self.residual3 = residualBlock3D(in_channels=16, out_channels=32)
-        self.residual4 = residualBlock3D(in_channels=32, out_channels=64)
-        self.residual5 = residualBlock3D(in_channels=64, out_channels=128)
-        self.residual6 = residualBlock3D(in_channels=128, out_channels=128)
+        self.residual1 = ResidualBlock3D(in_channels=1, out_channels=8)
+        self.residual2 = ResidualBlock3D(in_channels=8, out_channels=16)
+        self.residual3 = ResidualBlock3D(in_channels=16, out_channels=32)
+        self.residual4 = ResidualBlock3D(in_channels=32, out_channels=64)
+        self.residual5 = ResidualBlock3D(in_channels=64, out_channels=128)
+        self.residual6 = ResidualBlock3D(in_channels=128, out_channels=128)
 
         # Input shape is slices x h x w
         self.maxpool = nn.MaxPool3d((2, 2, 2), stride=(2, 2, 2))
@@ -76,7 +70,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         if self.interpolate:
-            x = F.interpolate(x, size=(self.slices, self.h, self.w))
+            x = f.interpolate(x, size=(self.slices, self.h, self.w))
         x = self.residual1(x)
         x = self.maxpool(x)
         x = self.residual2(x)
@@ -102,23 +96,14 @@ class DecoderPCA(nn.Module):
 
         device = config['device']
 
-        if config['Heads']:
-            self.matrix = np.load('trained/heads_pca_components.npy')
-            self.mean = np.load('models/heads_pca_mean.npy')
-        elif config['Lungs']:
-            self.matrix = np.load('models/lungs_pca_components.npy')
-            self.mean = np.load('models/lungs_pca_mean.npy')
-        else:
-            self.matrix = np.load('models/heart_pca_components.npy')
-            self.mean = np.load('models/heart_pca_mean.npy')
+        matrix = np.load('trained/heads_pca_components.npy')
+        mean = np.load('trained/heads_pca_mean.npy')
 
-        self.matrix = torch.from_numpy(self.matrix).float().to(device)
-        self.mean = torch.from_numpy(self.mean).float().to(device)
+        self.matrix = torch.from_numpy(matrix).float().to(device)
+        self.mean = torch.from_numpy(mean).float().to(device)
 
     def forward(self, x):
-        x = torch.matmul(x, self.matrix) + self.mean
-
-        return x
+        return torch.matmul(x, self.matrix) + self.mean
 
 
 class PCAH_Net(nn.Module):
