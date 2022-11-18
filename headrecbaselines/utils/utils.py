@@ -1,7 +1,10 @@
 import os
 
+import SimpleITK as sitk
 import matplotlib.pyplot as plt
 import numpy as np
+import vedo
+import vtkmodules.all as vtk
 
 
 def draw_organ(ax, array, color='b'):
@@ -234,3 +237,94 @@ def check_files_exist(files, exception=True, warn=True):
             else:
                 return False
     return True
+
+
+def binarize_mesh(mesh, src_img, invert=False):
+    """ Binarize a mesh using the src_img as a reference.
+
+    :param mesh: vedo mesh to be binarized
+    :param src_img: SimpleITK.Image used as a reference
+    :param invert: if True, the mesh is inverted (background is 1)
+    :return: binarized mesh, as a SimpleITK.Image
+    """
+    pd = mesh.polydata()  # get the mesh data
+
+    # Define the volume
+    whiteImage = vtk.vtkImageData()
+    whiteImage.SetDirectionMatrix(-1, 0, 0, 0, -1, 0, 0, 0, 1)
+    whiteImage.SetSpacing(src_img.GetSpacing())
+
+    dim = src_img.GetSize()
+    whiteImage.SetDimensions(dim)
+    whiteImage.SetExtent(0, dim[0] - 1, 0, dim[1] - 1, 0, dim[2] - 1)
+
+    whiteImage.SetOrigin(src_img.GetOrigin())
+    whiteImage.AllocateScalars(vtk.VTK_UNSIGNED_CHAR, 1)
+
+    # fill the image with foreground voxels:
+    inval = 0 if invert else 1
+
+    # count = whiteImage.GetNumberOfPoints()
+    # for i in range(count):
+    #     whiteImage.GetPointData().GetScalars().SetTuple1(i, inval)
+
+    # Check if it's the same image
+    whiteImage.GetPointData().GetScalars().Fill(inval)
+
+    # polygonal data --> image stencil:
+    pol2stenc = vtk.vtkPolyDataToImageStencil()
+    pol2stenc.SetInputData(pd)
+    pol2stenc.SetOutputOrigin(whiteImage.GetOrigin())
+    pol2stenc.SetOutputSpacing(whiteImage.GetSpacing())
+    pol2stenc.SetOutputWholeExtent(whiteImage.GetExtent())
+    pol2stenc.Update()
+
+    # cut the corresponding white image and set the background:
+    outval = 1 if invert else 0
+
+    imgstenc = vtk.vtkImageStencil()
+    imgstenc.SetInputData(whiteImage)
+    imgstenc.SetStencilConnection(pol2stenc.GetOutputPort())
+    imgstenc.SetReverseStencil(invert)
+    imgstenc.SetBackgroundValue(outval)
+    imgstenc.Update()
+
+    # Convert to SimpleITK
+    array = vedo.Volume(imgstenc.GetOutput()).tonumpy().astype(np.uint8)
+    array = np.transpose(array, (2, 1, 0))
+
+    o_img = sitk.GetImageFromArray(array)
+    o_img.CopyInformation(src_img)
+    return o_img
+
+
+def mesh2vol(mesh_path, source_path, out_img_path=None, overwrite=False):
+    """ Convert a mesh to a volume using the source image as a reference.
+
+    :param mesh_path: path to the mesh
+    :param source_path: path to the source image
+    :param out_img_path: path to the output image
+    :param overwrite: if True, overwrite the output image if it already exists
+    :return: None
+    """
+    print(f"Binarizing {mesh_path}..", end='')
+
+    mesh_ext = os.path.splitext(mesh_path)[1]
+    if mesh_ext not in ['.vtk', '.stl']:
+        print(f"Mesh {mesh_path} has extension {mesh_ext}. Trying to continue")
+
+    out_img_path = out_img_path if out_img_path is not None \
+        else mesh_path.replace(mesh_ext, "_binMesh.nii.gz")
+    os.makedirs(os.path.dirname(out_img_path), exist_ok=True)
+
+    if not overwrite and os.path.exists(out_img_path):
+        print(f"  file {out_img_path} already exists.")
+        return out_img_path
+
+    src_im = sitk.ReadImage(source_path)
+    inp_mesh = vedo.Mesh(mesh_path)
+    bin_vol = binarize_mesh(inp_mesh, src_im)  # Vedo mesh -> sitk.Image
+
+    sitk.WriteImage(bin_vol, out_img_path)
+    print("done.")
+    return out_img_path
