@@ -1,8 +1,7 @@
-import os
-
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import vedo
 import vtkmodules.all as vtk
 
@@ -328,3 +327,48 @@ def mesh2vol(mesh_path, source_path, out_img_path=None, overwrite=False):
     sitk.WriteImage(bin_vol, out_img_path)
     print("done.")
     return out_img_path
+
+
+def stl_to_vtk(filename):
+    """ Convert an STL file to a VTK file.
+
+    :param filename: Path to the STL file.
+    :return:
+    """
+    # Read the .stl file
+    a = vtk.vtkSTLReader()
+    a.SetFileName(filename)
+    a.Update()
+    a = a.GetOutput()
+
+    # Write the .vtk file
+    filename = filename.replace('.stl', '.vtk')
+    b = vtk.vtkPolyDataWriter()
+    b.SetFileName(filename)
+    b.SetInputData(a)
+    b.Update()
+    return filename
+
+
+def vtk_to_stl(filename):
+    if type(filename) is list:
+        files = []
+        for file in filename:
+            f = vtk_to_stl(file)
+            files.append(f)
+        if False in files:
+            print(f"WARNING: {file} could not be converted to stl.")
+        return files
+    if os.path.isfile(filename):
+        outfile = filename.replace('.vtk', '.stl')
+        print(f"Creating {outfile}")
+        reader = vtk.vtkGenericDataObjectReader()
+        reader.SetFileName(filename)
+        reader.Update()
+        writer = vtk.vtkSTLWriter()
+        writer.SetInputConnection(reader.GetOutputPort())
+        writer.SetFileName(outfile)
+        writer.Update()
+        return outfile
+    else:
+        return False
