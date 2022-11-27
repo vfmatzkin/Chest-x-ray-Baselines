@@ -10,7 +10,6 @@ from .utils import check_files_exist
 
 
 class MeshHeadsDataset(Dataset):
-    # self, images, img_path, label_path, transform=None, heart = False
     def __init__(self, images, img_path, label_path=None, transform=None,
                  test=False):
         self.images = images
