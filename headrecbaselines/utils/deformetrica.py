@@ -112,7 +112,7 @@ def deform_atlas_reg(template_path, dataset_paths, output_path=None,
 
     mopt = {
         'deformation_kernel_type': 'torch',
-        'deformation_kernel_width': 40.0, 'dtype': 'float32'
+        'deformation_kernel_width': 200.0, 'dtype': 'float32'
     }
     if model_options:
         mopt.update(model_options)
@@ -120,7 +120,8 @@ def deform_atlas_reg(template_path, dataset_paths, output_path=None,
     eopt = {
         'optimization_method_type': 'GradientAscent',
         'initial_step_size': 1., 'max_iterations': 25,
-        'max_line_search_iterations': 10, 'callback': estimator_callback
+        'max_line_search_iterations': 10, 'callback': estimator_callback,
+        'use_cuda': True
     }
     if estimator_options:
         eopt.update(estimator_options)
