@@ -112,7 +112,7 @@ def deform_atlas_reg(template_path, dataset_paths, output_path=None,
 
     mopt = {
         'deformation_kernel_type': 'torch',
-        'deformation_kernel_width': 200.0, 'dtype': 'float32'
+        'deformation_kernel_width': 40.0, 'dtype': 'float32'
     }
     if model_options:
         mopt.update(model_options)
