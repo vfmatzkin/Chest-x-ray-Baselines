@@ -13,22 +13,27 @@ plt = Plotter(shape=[1, 3], interactive=0, axes=1)
 
 
 class Morpher:
-    def __init__(self, source, target, distmap=None, dm_threshold=1.0):
+    def __init__(self, source, target, distmap=None, dm_threshold=1.0, 
+                 only_fit_common=True, allow_scaling=True, bound=0.1):
         self.source = source
         self.target = target
-        self.bound = 0.1
+        self.bound = bound
         self.method = "SLSQP"  # 'SLSQP', 'L-BFGS-B', 'TNC' ...
-        self.tolerance = 0.0001
-        self.allowScaling = False
+        self.tolerance = 0.00001
+        self.allowScaling = allow_scaling
         self.params = []
 
-        self.msource = None
+        self.morphed = None
         self.s_size = ([0, 0, 0], 1)  # ave position and ave size
         self.fitResult = None
         self.chi2 = 1.0e10
 
         self.distmap = distmap
         self.dm_threshold = dm_threshold
+        self.only_fit_common = only_fit_common
+        
+        self.target.wireframe()
+        self.old_source = None
 
     def transform(self, p):
         a1, a2, a3, a4, a5, a6, b1, b2, b3, b4, b5, b6, c1, c2, c3, c4, c5, \
@@ -66,7 +71,7 @@ class Morpher:
         for i in rng:
             p1 = srcpts[i]
 
-            if self.far_from_skull(p1):
+            if not self.only_fit_common and self.far_from_skull(p1):
                 continue  # Exclude points
 
             p2 = self.transform(p1)
@@ -80,9 +85,8 @@ class Morpher:
             self.chi2 = d2sum
         return d2sum
 
-    # ------------------------------------------------------- Fit
     def morph(self):
-        def avesize(pts):  # helper fnc
+        def avg_size(pts):
             s, amean = 0, vector(0, 0, 0)
             for p in pts:
                 amean = amean + p
@@ -90,11 +94,26 @@ class Morpher:
             for p in pts:
                 s += mag(p - amean)
             return amean, s / len(pts)
+        
+        if self.only_fit_common:
+            n_points = {}
+            s_points = {}
+            self.old_source = self.source.clone()
+            for i, point in enumerate(self.source.points()):
+                if self.far_from_skull(point):  # Far points remain static
+                    s_points[i] = point
+                else:
+                    n_points[i] = point
+            self.source = Mesh(np.array(list(n_points.values())))                
+            # valid_faces = []
+            # for face in original_mesh.faces():
+            #     if all(point in valid_points for point in face):
+            #         valid_faces.append(face)
 
         print("\n..minimizing with " + self.method)
-        self.msource = self.source.clone()
+        self.morphed = self.source.clone()
 
-        self.s_size = avesize(self.source.points())
+        self.s_size = avg_size(self.source.points())
         bnds = [(-self.bound, self.bound)] * 18
         x0 = [0.0] * 18  # initial guess
         x0 += [1.0]  # the optional scale
@@ -109,10 +128,23 @@ class Morpher:
         self.fitResult = res
 
         newpts = []
-        for p in self.msource.points():
+        for p in self.morphed.points():
             newp = self.transform(p)
             newpts.append(newp)
-        self.msource.points(newpts)
+        self.morphed.points(newpts)
+        
+        if self.only_fit_common:
+            # At this point, I have separatedly the points that were morphed
+            # and the ones that were not. I need to merge them back together
+            # in the same order as the original mesh (so I don't mess up the 
+            # faces information).
+            nw_pts = dict(zip(n_points.keys(), newpts))  # New points w
+            mrph_pts = s_points.copy()  # Static points
+            mrph_pts.update(nw_pts)  # Add new points with indexes
+            mrph_pts = dict(sorted(mrph_pts.items()))  # Sort by index
+            self.morphed = Mesh((np.array(list(mrph_pts.values())),
+                                 self.old_source.faces()))
+            
 
     def draw_shapes(self):
 
@@ -138,14 +170,14 @@ class Morpher:
         text3 = Text3D("deformation", tpos, s=sz / 10, c="dr")
 
         plt.at(2).show(sphere0, sphere1, zero, text3, hair)
-        plt.at(1).show(self.msource, self.target, text2)
+        plt.at(1).show(self.morphed, self.target, text2)
         plt.at(0).show(self.source, self.target, text1, zoom=1.2,
                        interactive=True)
         plt.close()
 
 
 def fit_mesh_dmap(src_mesh, tgt_mesh, distmap, save_path=None,
-                  dm_threshold=1, draw_shapes=False):
+                  dm_threshold=1, only_fit_common=True, draw_shapes=False):
     """ Fit a source mesh to a target mesh using a distance map.
 
     :param src_mesh: source mesh
@@ -153,20 +185,18 @@ def fit_mesh_dmap(src_mesh, tgt_mesh, distmap, save_path=None,
     :param distmap: distance map
     :param save_path: path to save the morphed mesh
     :param dm_threshold: distance map threshold
+    :param only_fit_common: only fit common points based on distance map
     :param draw_shapes: display shapes
     :return:
     """
-    mr = Morpher(src_mesh, tgt_mesh, distmap, dm_threshold)
-    mr.target.wireframe()
-    mr.allowScaling = True
-    mr.bound = 0.4  # limits the parameter value
+    mr = Morpher(src_mesh, tgt_mesh, distmap, dm_threshold, only_fit_common)
 
     mr.morph()
 
     print("Result of parameter fit:\n", mr.params)
 
     if save_path:
-        mr.msource.write(save_path)
+        mr.morphed.write(save_path)
 
     if draw_shapes:
         mr.draw_shapes()
