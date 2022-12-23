@@ -6,6 +6,7 @@ Vedo library example https://github.com/marcomusy/vedo/blob/master/examples/adva
 
 import scipy.optimize as opt
 from vedo import *
+import vg
 
 settings.use_depth_peeling = True
 
@@ -13,27 +14,43 @@ plt = Plotter(shape=[1, 3], interactive=0, axes=1)
 
 
 class Morpher:
-    def __init__(self, source, target, distmap=None, dm_threshold=1.0, 
-                 only_fit_common=True, allow_scaling=True, bound=0.1):
+    def __init__(self, source, target, distmap=None, params=None):
+
+        pm = {
+            'dm_threshold': 1.0,
+            'fit_only_common': True,
+            'allow_scaling': True,
+            'bound': 0.1,
+            'method': "SLSQP",
+            'tolerance': 0.00001,
+            'chi2': 1.0e10
+        }
+
+        pm.update(params or {})
+
         self.source = source
         self.target = target
-        self.bound = bound
-        self.method = "SLSQP"  # 'SLSQP', 'L-BFGS-B', 'TNC' ...
-        self.tolerance = 0.00001
-        self.allowScaling = allow_scaling
-        self.params = []
-
-        self.morphed = None
-        self.s_size = ([0, 0, 0], 1)  # ave position and ave size
-        self.fitResult = None
-        self.chi2 = 1.0e10
-
         self.distmap = distmap
-        self.dm_threshold = dm_threshold
-        self.only_fit_common = only_fit_common
-        
-        self.target.wireframe()
+        self.morphed = None
         self.old_source = None
+
+        self.bound = pm['bound']
+        self.method = pm['method']  # 'SLSQP', 'L-BFGS-B', 'TNC' ...
+        self.tolerance = pm['tolerance']
+        self.allow_scaling = pm['allow_scaling']
+        self.chi2 = pm['chi2']
+        self.dm_threshold = pm['dm_threshold']
+        self.fit_only_common = pm['fit_only_common']
+
+        self.params = []
+        self.fit_result = None
+
+        self.s_size = ([0, 0, 0], 1)  # ave position and ave size
+        self.target.wireframe()
+        
+        # compute normals
+        self.source.compute_normals()
+        self.target.compute_normals()
 
     def transform(self, p):
         a1, a2, a3, a4, a5, a6, b1, b2, b3, b4, b5, b6, c1, c2, c3, c4, c5, \
@@ -43,7 +60,7 @@ class Morpher:
         x, y, z = (p - pos) / sz * s  # bring to origin, norm and scale
         xx, yy, zz, xy, yz, xz = x * x, y * y, z * z, x * y, y * z, x * z
         xp = x + 2 * a1 * xy + a4 * xx + 2 * a2 * yz + a5 * yy \
-             + 2 * a3 * xz + a6 * zz
+            + 2 * a3 * xz + a6 * zz
         yp = +2 * b1 * xy + b4 * xx + y + 2 * b2 * yz + b5 * yy \
              + 2 * b3 * xz + b6 * zz
         zp = +2 * c1 * xy + c4 * xx + 2 * c2 * yz + c5 * yy + z \
@@ -71,11 +88,18 @@ class Morpher:
         for i in rng:
             p1 = srcpts[i]
 
-            if not self.only_fit_common and self.far_from_skull(p1):
+            if not self.fit_only_common and self.far_from_skull(p1):
                 continue  # Exclude points
 
-            p2 = self.transform(p1)
-            tp = self.target.closest_point(p2)
+            # p2 = self.transform(p1)
+            p2 = p1
+            cls_pts = self.target.closest_point(p2, n=100, return_point_id=True)
+
+            tp = self.sel_norm(i, cls_pts)
+            if tp is None:
+                print("No near point found")
+                continue
+            
             d2sum += mag2(p2 - tp)
         d2sum /= len(rng)
 
@@ -84,6 +108,27 @@ class Morpher:
                 print("Emin ->", d2sum)
             self.chi2 = d2sum
         return d2sum
+
+    def sel_norm(self, i, cls_pts_tgt, angle=30):
+        """
+        Given a point and a list of closest points, select the one with the
+        most similar normal.
+
+        Parameters
+        ----------
+        i : int
+            Index of the point to move in the source mesh.
+        cls_pts_tgt : list
+            List of the indexes of the closest points in the target mesh.
+        """
+        n = self.old_source.normals()[i]  # Normal of the point
+        for p in cls_pts_tgt:
+            #  Use vg.angle to get the angle between the normals
+            ang = vg.angle(self.target.normals()[p], n)
+            if ang < angle:
+                return self.target.points()[p]
+        return None
+        
 
     def morph(self):
         def avg_size(pts):
@@ -94,21 +139,17 @@ class Morpher:
             for p in pts:
                 s += mag(p - amean)
             return amean, s / len(pts)
-        
-        if self.only_fit_common:
-            n_points = {}
-            s_points = {}
+
+        if self.fit_only_common:
+            n_points = {}  # New points
+            s_points = {}  # Static points
             self.old_source = self.source.clone()
             for i, point in enumerate(self.source.points()):
                 if self.far_from_skull(point):  # Far points remain static
                     s_points[i] = point
                 else:
                     n_points[i] = point
-            self.source = Mesh(np.array(list(n_points.values())))                
-            # valid_faces = []
-            # for face in original_mesh.faces():
-            #     if all(point in valid_points for point in face):
-            #         valid_faces.append(face)
+            self.source = Mesh(np.array(list(n_points.values())))
 
         print("\n..minimizing with " + self.method)
         self.morphed = self.source.clone()
@@ -117,26 +158,26 @@ class Morpher:
         bnds = [(-self.bound, self.bound)] * 18
         x0 = [0.0] * 18  # initial guess
         x0 += [1.0]  # the optional scale
-        if self.allowScaling:
+        if self.allow_scaling:
             bnds += [(1.0 - self.bound, 1.0 + self.bound)]
         else:
             bnds += [(1.0, 1.0)]  # fix scale to 1
-        res = opt.minimize(self._func, x0,
-                           bounds=bnds, method=self.method, tol=self.tolerance)
+        res = opt.minimize(self._func, x0, bounds=bnds, method=self.method, 
+                           tol=self.tolerance)
         self._func(res["x"])
         print("\nFinal fit score", res["fun"])
-        self.fitResult = res
+        self.fit_result = res
 
         newpts = []
         for p in self.morphed.points():
             newp = self.transform(p)
             newpts.append(newp)
         self.morphed.points(newpts)
-        
-        if self.only_fit_common:
+
+        if self.fit_only_common:
             # At this point, I have separatedly the points that were morphed
             # and the ones that were not. I need to merge them back together
-            # in the same order as the original mesh (so I don't mess up the 
+            # in the same order as the original mesh (so I don't mess up the
             # faces information).
             nw_pts = dict(zip(n_points.keys(), newpts))  # New points w
             mrph_pts = s_points.copy()  # Static points
@@ -144,7 +185,6 @@ class Morpher:
             mrph_pts = dict(sorted(mrph_pts.items()))  # Sort by index
             self.morphed = Mesh((np.array(list(mrph_pts.values())),
                                  self.old_source.faces()))
-            
 
     def draw_shapes(self):
 
@@ -176,27 +216,35 @@ class Morpher:
         plt.close()
 
 
-def fit_mesh_dmap(src_mesh, tgt_mesh, distmap, save_path=None,
-                  dm_threshold=1, only_fit_common=True, draw_shapes=False):
+def fit_mesh_dmap(src_mesh, tgt_mesh, distmap, params=None):
     """ Fit a source mesh to a target mesh using a distance map.
 
     :param src_mesh: source mesh
     :param tgt_mesh: target mesh
     :param distmap: distance map
-    :param save_path: path to save the morphed mesh
+    :param save_path: 
     :param dm_threshold: distance map threshold
     :param only_fit_common: only fit common points based on distance map
     :param draw_shapes: display shapes
     :return:
     """
-    mr = Morpher(src_mesh, tgt_mesh, distmap, dm_threshold, only_fit_common)
+    pm = {
+        'dm_threshold': 1.0,  # distance map threshold
+        'fit_only_common': True,  # only fit common points based on distance map
+        'allow_scaling': True,
+        'bound': 0.1,  # bound for the parameter search
+        'method': "SLSQP",  # minimization method
+        'tolerance': 0.00001,  # minimization tolerance
+        'chi2': 1.0e10,
+        'save_path': None,  # path to save the morphed mesh
+        'draw_shapes': False,  # display shapes
+    }
 
+    pm.update(params or {})
+    mr = Morpher(src_mesh, tgt_mesh, distmap, pm)
     mr.morph()
 
     print("Result of parameter fit:\n", mr.params)
 
-    if save_path:
-        mr.morphed.write(save_path)
-
-    if draw_shapes:
-        mr.draw_shapes()
+    mr.morphed.write(pm['save_path']) if pm['save_path'] else None
+    mr.draw_shapes() if pm['draw_shapes'] else None
