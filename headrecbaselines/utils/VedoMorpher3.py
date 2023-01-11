@@ -103,4 +103,5 @@ def fit_mesh_dmap(src_mesh, tgt_mesh, distmap, params=None):
     pm.update(params or {})
     mr = Morpher(src_mesh, tgt_mesh, distmap, pm)
     mr.morph()
+    return mr
     
